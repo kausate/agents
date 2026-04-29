@@ -1,0 +1,25 @@
+{
+  "name": "kausate",
+  "description": "Official Kausate plugins for AI coding assistants integrating the Kausate company-data API.",
+  "owner": {
+    "name": "Kausate",
+    "url": "https://kausate.com"
+  },
+  "plugins": [
+    {
+      "name": "kausate-integration",
+      "description": "Integrate the Kausate company-data API: generate a typed client from the live openapi.json, set up async + webhook handling, use customerId and customerReference correctly, fall back to polling only when webhooks aren't possible.",
+      "category": "development",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/kausate/agents.git",
+        "path": "plugins/kausate-integration"
+      },
+      "homepage": "https://docs.kausate.com",
+      "author": {
+        "name": "Kausate",
+        "url": "https://kausate.com"
+      }
+    }
+  ]
+}

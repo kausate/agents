@@ -1,0 +1,10 @@
+{
+  "name": "kausate-integration",
+  "version": "1.0.0",
+  "description": "Integrate the Kausate company-data API into your codebase: typed client from openapi.json, async + webhooks, customerId and customerReference, polling fallback.",
+  "author": {
+    "name": "Kausate",
+    "url": "https://kausate.com"
+  },
+  "homepage": "https://docs.kausate.com"
+}
