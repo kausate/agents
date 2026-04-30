@@ -381,7 +381,28 @@ Document retrieval is two async orders, in this order:
      -H "Kausate-Version: 2026-05-01" \
      -d '{"kausateId":"co_de_...","customerReference":"docs-list-1"}'
    ```
-   Result type `listDocuments` — array of `DocumentInfo` with `kausateDocumentId`, `documentType` (e.g. `annualAccounts`, `articlesOfAssociation`, `shareholderList`), `publicationDate`, `fileType`.
+   On completion, `result` has shape (type `listDocuments`):
+   ```json
+   {
+     "type": "listDocuments",
+     "kausateId": "co_de_...",
+     "documents": [
+       {
+         "kausateDocumentId": "doc_...",
+         "title": "Aktueller Abdruck",
+         "documentType": "currentExtract",
+         "publicationType": null,
+         "publicationDate": "2024-03-15",
+         "fileType": "pdf",
+         "source": "de-handelsregister"
+       }
+     ],
+     "totalCount": 1,
+     "indexedAt": "2024-...",
+     "expiresAt": "2024-..."
+   }
+   ```
+   `documentType` values include `annualAccounts`, `currentExtract`, `articlesOfAssociation`, `shareholderList`, `chronologicalExtract`, `officialFilings`, `registrationDetails`, `beneficialOwnersDetails`, `annualReturn`. `documentType`/`publicationDate` are sometimes `null`; filter accordingly.
 
 2. **Retrieve a specific document by `kausateDocumentId`:**
    ```bash
@@ -394,7 +415,19 @@ Document retrieval is two async orders, in this order:
        "customerReference":"docs-fetch-1"
      }'
    ```
-   Result type `document` — includes a `downloadLink` (pre-signed S3-style URL with an `expiresAt` timestamp), plus `contentType`, `fileName`, etc. **Webhook payloads carry the URL, not the bytes.** Fetch the bytes from `downloadLink` before it expires.
+   On completion, `result` has shape (type `document`):
+   ```json
+   {
+     "type": "document",
+     "kausateDocumentId": "doc_...",
+     "documentType": "currentExtract",
+     "downloadLink": "https://kausate-...s3.../...?X-Amz-Signature=...",
+     "expiresAt": "2024-...",
+     "contentType": "application/pdf",
+     "fileName": "current-extract.pdf"
+   }
+   ```
+   `downloadLink` is a pre-signed S3-style URL with an `expiresAt` timestamp. **Webhook payloads carry the URL, not the bytes.** Fetch the bytes from `downloadLink` directly (no `X-API-Key` needed on that fetch — the URL is signed) before `expiresAt`.
 
 ## 10. Monitors — change detection on a schedule
 
@@ -477,6 +510,7 @@ Error response shape:
 - **Mixing path styles for different `Kausate-Version`s.** With `2026-05-01` use `POST /v2/companies/report` (`kausateId` in body). With `2025-04-01` use `POST /v2/companies/{kausateId}/report`. Don't mix.
 - **Putting `customerId` in the request body.** It's `X-Customer-Id` header. Body submission returns 422.
 - **Calling `prefill` (or any data endpoint) with `companyNumber` / `jurisdictionCode` instead of `kausateId`.** Returns 422. Translate native registry IDs to `kausateId` via `search` first, then cache the mapping.
+- **Bash + `jq` pipelines for any non-trivial Kausate flow.** The async + polling + webhook patterns this skill describes need real error types, retry policies, idempotency keys, and structured logging — none of which `jq` gives you. Use Python, Node, Go, or any language with a real JSON parser and a real HTTP client. `curl` for a one-line health check is fine; multi-step orchestration in shell is not.
 - **Sending `customerReference` longer than 150 chars or with non URL-safe characters.** Will 422.
 - **Subscribing a webhook *after* placing the order and expecting backfill.** Subscribe first; never the other way around.
 
