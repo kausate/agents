@@ -97,9 +97,32 @@ The full source of truth is `openapi.json`; this is the map an integrator usuall
 | `GET /v2/companies/search/autocomplete` | Type-ahead during form input | sync | < 100 ms |
 | `POST /v2/companies/search` | Live registry search by name / number / advanced query | **async by default**, sync available at `/search/sync` | 2–10 s live |
 | `GET /v2/companies/search/person` | Find companies by legal-rep name + DOB | sync | 1–5 s |
-| `POST /v2/companies/prefill` | Form-prefill: index hit + live fallback. Best onboarding UX. | always sync | < 200 ms typical |
+| `POST /v2/companies/prefill` | Form-prefill from a known `kausateId`. Index hit + live fallback. Best onboarding UX. | always sync | < 200 ms typical |
 
 Search request body fields: `companyName`, `companyNumber`, `advancedQuery` (jurisdiction-specific structured query), `jurisdictionCode`, `customerReference`. Use `advancedQuery` when you have native registry numbers — it avoids fuzzy matching.
+
+### Translating a native registry ID to a `kausateId`
+
+`prefill` and every data endpoint require a `kausateId` in the body. They do **not** accept `companyNumber` or `jurisdictionCode` — submitting those fields fails 422 (`extra_forbidden`). To go from a native ID (KVK number, CRN, SIREN, HRB, etc.) to a `kausateId`, use `search`:
+
+```bash
+# Step 1 — translate native id → kausateId via search
+curl -X POST https://api.kausate.com/v2/companies/search/sync \
+  -H "X-API-Key: $KAUSATE_API_KEY" \
+  -H "Kausate-Version: 2026-05-01" \
+  -H "Content-Type: application/json" \
+  -d '{"companyNumber":"33255959","jurisdictionCode":"nl"}'
+# → result.searchResults[0].kausateId
+
+# Step 2 — use that kausateId everywhere else
+curl -X POST https://api.kausate.com/v2/companies/prefill \
+  -H "X-API-Key: $KAUSATE_API_KEY" \
+  -H "Kausate-Version: 2026-05-01" \
+  -H "Content-Type: application/json" \
+  -d '{"kausateId":"co_nl_..."}'
+```
+
+Cache the `(native_id, kausateId)` pair on your side. The mapping is stable, and re-running search on every call wastes credits.
 
 ### Company data (async by default, sync available)
 
@@ -160,10 +183,64 @@ curl -X POST https://api.kausate.com/v2/webhooks \
 
 Notes:
 
-- A single subscription receives completions for **all** order types your org places (reports, documents, UBO, shareholder graph, financials, monitor changes). There is no event-type filter. Switch on `result.type` or `status` in your handler.
+- A single subscription receives completions for **all** order types your org places. There is no event-type filter. Switch on `result.type` in your handler:
+
+| `result.type` | Comes from |
+|---|---|
+| `liveSearch` | `POST /v2/companies/search` |
+| `companyReport` | `POST /v2/companies/report` |
+| `financials` | `POST /v2/companies/finance` |
+| `uboReport` | `POST /v2/companies/ubo` |
+| `shareholderGraph` | `POST /v2/companies/shareholder-graph` |
+| `listDocuments` | `POST /v2/companies/documents/list` |
+| `document` | `POST /v2/companies/documents` |
+| `person` | `GET /v2/companies/search/person` (rare in async path) |
+
+A typical receiver pattern:
+
+```ts
+switch (payload.result?.type) {
+  case "companyReport":   handleReport(payload); break;
+  case "uboReport":       handleUbo(payload); break;
+  case "shareholderGraph":handleGraph(payload); break;
+  case "listDocuments":   handleDocList(payload); break;
+  case "document":        handleDocument(payload); break;
+  // ...
+  default:
+    // null result = error path; check payload.status / payload.error
+}
+```
+
+If `payload.result` is `null`, the order didn't reach a successful state — branch on `payload.status` (see §7) and use `payload.error` for the user-visible message.
 - All `ACTIVE` webhooks for the org receive every event. Multi-tenant routing happens in your handler — typically by inspecting `customerReference` or `customerId`.
 - The `apiVersion` field on the subscription body is **deprecated**. Webhook payload shape is determined by the `Kausate-Version` header that was on the *original order request*, falling back to your org's default. Pin per-request, not per-subscription.
 - `customHeaders` are stored encrypted server-side and replayed on every delivery. Six headers are protected and cannot be overridden: `content-type`, `host`, `content-length`, `transfer-encoding`, `connection`, `kausate-version`.
+
+### Manage webhook subscriptions
+
+The subscription returns an `id` (UUID), `status` (`active` | `inactive`), and `url`. Persist the id — you'll need it to update or delete the subscription.
+
+```bash
+# List
+curl -H "X-API-Key: $KAUSATE_API_KEY" -H "Kausate-Version: 2026-05-01" \
+  https://api.kausate.com/v2/webhooks
+
+# Get one
+curl -H "X-API-Key: $KAUSATE_API_KEY" -H "Kausate-Version: 2026-05-01" \
+  https://api.kausate.com/v2/webhooks/$WEBHOOK_ID
+
+# Pause without deleting (status: inactive — no deliveries until you re-activate)
+curl -X PUT -H "X-API-Key: $KAUSATE_API_KEY" -H "Kausate-Version: 2026-05-01" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"inactive"}' \
+  https://api.kausate.com/v2/webhooks/$WEBHOOK_ID
+
+# Delete (returns 204)
+curl -X DELETE -H "X-API-Key: $KAUSATE_API_KEY" -H "Kausate-Version: 2026-05-01" \
+  https://api.kausate.com/v2/webhooks/$WEBHOOK_ID
+```
+
+Pausing is safer than deleting if you're rotating receivers — pause the old one, register the new one, verify it works, then delete the old one. Orders placed during a fully-paused window will not redeliver when you reactivate (no backfill — see §4).
 
 ### Place an async order
 
@@ -399,6 +476,7 @@ Error response shape:
 - **Assuming a webhook won't be redelivered.** It will, up to 50 times. Be idempotent on `orderId`.
 - **Mixing path styles for different `Kausate-Version`s.** With `2026-05-01` use `POST /v2/companies/report` (`kausateId` in body). With `2025-04-01` use `POST /v2/companies/{kausateId}/report`. Don't mix.
 - **Putting `customerId` in the request body.** It's `X-Customer-Id` header. Body submission returns 422.
+- **Calling `prefill` (or any data endpoint) with `companyNumber` / `jurisdictionCode` instead of `kausateId`.** Returns 422. Translate native registry IDs to `kausateId` via `search` first, then cache the mapping.
 - **Sending `customerReference` longer than 150 chars or with non URL-safe characters.** Will 422.
 - **Subscribing a webhook *after* placing the order and expecting backfill.** Subscribe first; never the other way around.
 
