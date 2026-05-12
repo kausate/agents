@@ -9,10 +9,98 @@ curl -H "X-API-Key: $KAUSATE_API_KEY" https://api.kausate.com/v2/...
 ```
 
 - Get an API key from [kausate.com/signup](https://www.kausate.com/signup) → dashboard → API keys.
-- **Read from environment variables only.** Never commit keys. Add `.env*` to `.gitignore`.
+- **Read from environment variables or a managed secret store — never commit keys.** Add `.env*` to `.gitignore`.
 - Rotate via the dashboard if a key leaks.
 - API keys are org-scoped. Auth is `X-API-Key` only — no OAuth, no JWT for the public API.
 - **No sandbox or test environment.** Every call hits production registries and consumes credits. Use small test budgets during development.
+
+### Loading the API key — common secret stores
+
+Mirror whatever the rest of the codebase uses. Common patterns:
+
+**Plain `.env` / dotenv** (Node, Python, Go, most local dev):
+```bash
+# .env (gitignored)
+KAUSATE_API_KEY=sk_live_...
+```
+```ts
+const key = process.env.KAUSATE_API_KEY!;
+```
+```python
+import os
+key = os.environ["KAUSATE_API_KEY"]
+```
+
+**Pydantic Settings** (Python / FastAPI):
+```python
+from pydantic_settings import BaseSettings
+from pydantic import SecretStr
+
+class Settings(BaseSettings):
+    kausate_api_key: SecretStr
+    class Config: env_file = ".env"
+
+key = Settings().kausate_api_key.get_secret_value()
+```
+
+**AWS Secrets Manager** (Lambda, ECS, EKS):
+```python
+import boto3, json
+sm = boto3.client("secretsmanager")
+secret = json.loads(sm.get_secret_value(SecretId="kausate/api-key")["SecretString"])
+key = secret["KAUSATE_API_KEY"]
+```
+```ts
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
+const sm = new SecretsManagerClient({});
+const { SecretString } = await sm.send(new GetSecretValueCommand({ SecretId: "kausate/api-key" }));
+const key = JSON.parse(SecretString!).KAUSATE_API_KEY;
+```
+
+**AWS SSM Parameter Store** (lighter alternative to Secrets Manager):
+```python
+import boto3
+ssm = boto3.client("ssm")
+key = ssm.get_parameter(Name="/kausate/api_key", WithDecryption=True)["Parameter"]["Value"]
+```
+
+**GCP Secret Manager**:
+```python
+from google.cloud import secretmanager
+client = secretmanager.SecretManagerServiceClient()
+key = client.access_secret_version(name="projects/<id>/secrets/kausate-api-key/versions/latest").payload.data.decode()
+```
+
+**Azure Key Vault**:
+```python
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+client = SecretClient(vault_url="https://<vault>.vault.azure.net/", credential=DefaultAzureCredential())
+key = client.get_secret("kausate-api-key").value
+```
+
+**HashiCorp Vault**:
+```python
+import hvac
+client = hvac.Client(url="https://vault.internal", token=os.environ["VAULT_TOKEN"])
+key = client.secrets.kv.v2.read_secret_version(path="kausate")["data"]["data"]["api_key"]
+```
+
+**Doppler** (drop-in `.env` replacement):
+```bash
+doppler run -- node server.js   # secrets injected as env vars
+# then in code: process.env.KAUSATE_API_KEY
+```
+
+**1Password Connect** (server-side secrets):
+```ts
+import { OnePasswordConnect } from "@1password/connect";
+const op = OnePasswordConnect({ serverURL, token });
+const item = await op.getItemByTitle("vault-id", "Kausate API key");
+const key = item.fields!.find(f => f.label === "credential")!.value!;
+```
+
+**Don't fall back to plain `.env` for production deploys** when the codebase already commits to a secret store — that's the path that leaks keys to dev laptops and source control. Match the existing pattern; if no pattern exists yet, prefer the platform-managed store the team already uses for other secrets.
 
 ## Pin the API version with `Kausate-Version`
 

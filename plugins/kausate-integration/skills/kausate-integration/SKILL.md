@@ -46,9 +46,11 @@ The fixed questions to consider, in priority order:
 
    When you propose the file layout, propose **all of it up front**, not just the receiver: the typed client module, the order-completion receiver, the monitor change-event receiver (if monitoring is in scope — it's a separate webhook channel with a different payload shape), and the background-task / queue module if the codebase uses Celery / BullMQ / Sidekiq / cron. Partial layouts force the user to ask follow-up questions and slow the migration.
 
-3. **Migration source** — only ask if §1a didn't surface one. "Are you replacing an existing KYB / company-data provider? (Kyckr / Moody's-kompany / Moody's-Orbis-or-Maxsight / Topograph / OpenCorporates / Creditsafe / D&B / custom-built / no — greenfield.)"
+3. **API key source.** "Where should I read the Kausate API key from at runtime? (`process.env.KAUSATE_API_KEY` / AWS Secrets Manager / SSM Parameter Store / GCP Secret Manager / Azure Key Vault / HashiCorp Vault / Doppler / 1Password Connect / a custom config loader / I don't have a key yet — I'll get one from [kausate.com/signup](https://www.kausate.com/signup) → dashboard → API keys.)" — If the codebase already commits to one secret store (e.g. an existing `getSecret('stripe-key')` call, a `SecretsManagerClient` import, a `vault.read(...)` call), **don't ask** — mirror that exact pattern for `KAUSATE_API_KEY` and just confirm: *"I'll wire `KAUSATE_API_KEY` through the same Secrets Manager path you use for Stripe. OK?"* See `references/auth-versioning.md` for per-store code recipes.
 
-4. **Jurisdictions** — only ask if the codebase shows it matters (e.g. they have a `countries: ['GB']` config). "Which jurisdictions do you need on day one? Coverage is 50+; the registry behavior differs a bit per country. *If 'global / all', I won't optimize for any one of them.*"
+4. **Migration source** — only ask if §1a didn't surface one. "Are you replacing an existing KYB / company-data provider? (Kyckr / Moody's-kompany / Moody's-Orbis-or-Maxsight / Topograph / OpenCorporates / Creditsafe / D&B / custom-built / no — greenfield.)"
+
+5. **Jurisdictions** — only ask if the codebase shows it matters (e.g. they have a `countries: ['GB']` config). "Which jurisdictions do you need on day one? Coverage is 50+; the registry behavior differs a bit per country. *If 'global / all', I won't optimize for any one of them.*"
 
 **Power-user escape hatch.** If the user says any of: *"just give me the whole guide,"* *"dump the skill,"* *"I know what I'm doing,"* *"no questions,"* — skip §1 entirely and read every reference in `references/` (still excluding `migrations/` unless relevant). Some integrators want the wall of text.
 
