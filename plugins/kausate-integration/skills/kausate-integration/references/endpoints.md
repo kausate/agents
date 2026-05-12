@@ -43,7 +43,7 @@ Cache the `(native_id, kausateId)` pair on your side. The mapping is stable, and
 | `POST /v2/companies/report` | Full company report from the registry (legal name, addresses, identifiers, capital, legal reps, shareholders) |
 | `POST /v2/companies/finance` | Financials / annual accounts when available |
 | `POST /v2/companies/ubo` | Ultimate Beneficial Owners |
-| `POST /v2/companies/shareholder-graph` | Multi-level ownership graph. Always async. Configurable `maxDepth` (1–7), `enriched` (governance enrichment), `retrievalTimeout` (minutes) |
+| `POST /v2/companies/shareholder-graph` | Multi-level ownership graph. Configurable `maxDepth` (1–7), `enriched` (governance enrichment), `retrievalTimeout` (minutes). Multi-level traversal can take minutes — async is the only sensible mode in production even though `/shareholder-graph/sync` exists. |
 | `POST /v2/companies/documents/list` | List the documents available for a company |
 | `POST /v2/companies/documents` | Retrieve a specific document (binary served via pre-signed URL in the result) |
 

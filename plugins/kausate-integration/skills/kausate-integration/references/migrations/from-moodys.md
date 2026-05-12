@@ -734,7 +734,7 @@ Check types ("tasks") include — verbatim names where Google indexed the help-c
 |---|---|
 | `INDIVIDUAL_ASSESS_MEDIA_AND_POLITICAL_AND_SANCTIONS_EXPOSURE` | PEPs + sanctions + adverse media on a person |
 | `COMPANY_ASSESS_MEDIA_AND_SANCTIONS_EXPOSURE` | Company sanctions + adverse media |
-| `COMPANY_WEBSITE_CONTENT` | Website content check; result `Pass | Refer | Error` |
+| `COMPANY_WEBSITE_CONTENT` | Website content check; result `Pass` / `Refer` / `Error` |
 | (Identity check, document verification, document fetch, device fraud, merchant fraud, visa check, company screening) | Other check families per `help.maxsight.com/en/check-types` |
 
 **Webhook callbacks** are configured per-tenant in the UI (`Manage account > Webhook config > Webhooks enabled`):

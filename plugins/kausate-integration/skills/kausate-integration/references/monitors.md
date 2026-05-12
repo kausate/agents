@@ -1,6 +1,6 @@
 # Monitors — change detection on a schedule
 
-A **monitor** watches one company across one or more **sources** and emits **events** when it detects a change. Each event is classified into a generic, jurisdiction-agnostic taxonomy (`event_code` + `category`) so your routing logic doesn't need a per-jurisdiction mapping table. Per-event billing: 1 credit (`AAKMON`) per scheduled tick of a per-company source, plus 1 credit (`AAKEVT`) per delivered webhook event (refunded if every retry fails).
+A **monitor** watches one company across one or more **sources** and emits **events** when it detects a change. Each event is classified into a generic, jurisdiction-agnostic taxonomy (`event_code` + `category`) so your routing logic doesn't need a per-jurisdiction mapping table. Billing: **5 credits** (`AAKMON`) per scheduled tick of a per-company source, plus **1 credit** (`AAKEVT`) per delivered webhook event (refunded if every retry fails).
 
 > **Two distinct webhook channels.** The org-wide `POST /v2/webhooks` subscription (`async-webhooks.md`) delivers **async order completions** (`ExecutionResponse` payloads — camelCase, `result.type` discriminator). Monitor change events are delivered to the **per-monitor `webhookUrl`** you set on `POST /v2/monitors` (`monitor.change_detected` payload — **snake_case**, completely different shape). Don't reuse one handler for both — switch on the path your endpoint receives or use separate URLs.
 

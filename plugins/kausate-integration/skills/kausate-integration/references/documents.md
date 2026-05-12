@@ -68,5 +68,5 @@ On completion, `result` has shape (type `document`):
 ## Common patterns
 
 - **Cache the listing for at least a day.** `documents/list` is itself an order; if your user is browsing the list, you don't want to re-list on every click. The `expiresAt` in the result indicates the index validity window.
-- **Defer the actual fetch.** The list is cheap; the document fetch costs more. Only `documents` once the user clicks "download."
+- **Defer the actual fetch.** The list is cheap; the document fetch costs more. Only call `POST /v2/companies/documents` once the user clicks "download."
 - **Don't store the `downloadLink`.** It expires. Persist the bytes you fetched, or persist `kausateDocumentId` and re-order if you need the file later.
