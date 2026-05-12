@@ -1,6 +1,6 @@
 # Migrating from Topograph to Kausate
 
-Topograph is the closest architectural twin among Kausate's competitors — both REST, header-keyed, async with webhooks. Once you've renamed headers and translated identifiers, **the migration is mostly fanning one multi-`dataPoints` POST out into N per-product orders**, plus swapping a Svix HMAC verifier for a shared-secret header check.
+Topograph is the closest architectural twin among Kausate's competitors — both REST, header-keyed, async with webhooks. Once you've renamed headers and translated identifiers, **the migration is mostly fanning one multi-`dataPoints` POST out into N per-product orders**, plus swapping a Svix HMAC verifier for a shared-secret header check on order webhooks.
 
 If anything here disagrees with `https://api.kausate.com/openapi.json`, the spec wins.
 
@@ -25,10 +25,9 @@ Kausate is **one endpoint per data product**: `report`, `finance`, `ubo`, `share
 | `POST /v2/onboarding` (deprecated) | `POST /v2/companies/prefill` | |
 | `POST /v2/company { requestId }` (cached re-read) | `GET /v2/companies/{family}/{orderId}` | Per-order polling. |
 | `GET /v2/company/{requestId}` (poll) | Webhook on `POST /v2/webhooks` (primary) or `GET /v2/companies/{family}/{orderId}` (fallback) | See `../async-webhooks.md`. |
-| `POST /v2/monitors`, `GET /v2/monitors/{id}/logs`, `DELETE /v2/monitors/{id}` | `POST /v2/monitors`, `GET /v2/monitors/{id}/events`, `DELETE /v2/monitors/{id}` | See `../monitors.md`. |
-| `GET /v2/pricing?countryCode=` | (none) — post-hoc `GET /v2/analytics/summary` + dashboard | See §11. |
-| `GET /v2/workspaces`, `/v2/workspaces/usage`, `/v2/billing/notifications/*` | (none — dashboard / API-key-per-tenant) | See §12. |
-| Webhook `company.updated`, `monitor.notification` (Svix HMAC) | `ExecutionResponse` (order webhooks, shared-secret header) + `monitor.change_detected` (monitor webhooks, no HMAC) | See §10. |
+| `GET /v2/pricing?countryCode=` | (none) — post-hoc `GET /v2/analytics/summary` + dashboard | See §10. |
+| `GET /v2/workspaces`, `/v2/workspaces/usage`, `/v2/billing/notifications/*` | (none — dashboard / API-key-per-tenant) | See §11. |
+| Webhook `company.updated` (Svix HMAC) | `ExecutionResponse` (order webhooks, shared-secret header) | See §9. |
 
 ---
 
@@ -43,7 +42,7 @@ Kausate is **one endpoint per data product**: `report`, `finance`, `ubo`, `share
 ```
 
 1. **`x-api-key` → `X-API-Key`.** Same model (org-scoped, header-only). Rotate via the dashboard.
-2. **`x-topograph-workspace-id` has no Kausate equivalent.** Kausate API keys are org-scoped; there's no workspace tier between org and key. For per-tenant attribution use `X-Customer-Id` (see §12, `../customer-correlation.md`).
+2. **`x-topograph-workspace-id` has no Kausate equivalent.** Kausate API keys are org-scoped; there's no workspace tier between org and key. For per-tenant attribution use `X-Customer-Id` (see §11, `../customer-correlation.md`).
 3. **`Kausate-Version: 2026-05-01` is mandatory.** Topograph has no versioning header — its OpenAPI evolves at-will. Kausate uses date-based versioning; skip the header and you get the org's default, which can shift. Pin per request and in your generated-client config. See `../auth-versioning.md`.
 
 ---
@@ -332,80 +331,7 @@ See `../async-webhooks.md` for the receiver checklist (idempotent on `orderId`, 
 
 ---
 
-## 9. Monitors
-
-### Categories — verbatim identical
-
-Topograph: `status, address, ownership, financial, legalRepresentatives, other, disappeared`.
-Kausate:   `status, address, ownership, financial, legalRepresentatives, other, disappeared`.
-
-Routing logic that switches on Topograph's category ports 1:1.
-
-### Endpoint mapping
-
-| Topograph | Kausate |
-|---|---|
-| `POST /v2/monitors { companyId, countryCode }` | `POST /v2/monitors { kausateId, sources, scheduleCron, webhookUrl, categoriesFilter, eventCodesFilter, autoDeactivateCategories }` |
-| `GET /v2/monitors` (cursor `after`, `first`) | `GET /v2/monitors` (cursor pagination) |
-| `GET /v2/monitors/{id}` | `GET /v2/monitors/{id}` |
-| `DELETE /v2/monitors/{id}` | `DELETE /v2/monitors/{id}` |
-| `GET /v2/monitors/{id}/logs` (`changeDetected`, `changeCategories`, `fetchStatus`: `success / not_found / error / error_final`) | `GET /v2/monitors/{id}/events` (persisted including filtered-out; supports `replay`) |
-
-### Cron model
-
-Topograph fetches **daily** for every monitor — no schedule control. Kausate uses an explicit `scheduleCron` (5-field, UTC) that drives `per_company_pull` sources; `global_feed` sources run centrally on upstream publication.
-
-### Signing — biggest receiver-side change
-
-| Topograph | Kausate |
-|---|---|
-| **Svix HMAC** — `svix-id`, `svix-timestamp`, `svix-signature` headers; secret `whsec_…`; verify with Svix SDK | Order webhooks: **shared-secret custom header** (you choose). Monitor webhooks: **no HMAC, no custom headers today** — use an unguessable HTTPS path or front with a reverse-proxy |
-
-### Webhook payload — different cardinality
-
-Topograph (`monitor.notification`) fires **once with an array** of changed categories:
-
-```json
-{
-  "type": "monitor.notification",
-  "monitorId": "cmfzlu1dt000j12ldeqrfszq0",
-  "companyId": "123456789",
-  "countryCode": "DE",
-  "timestamp": "2026-03-20T02:00:00Z",
-  "changeCategories": ["status", "address"],
-  "monitorHasBeenDeactivated": false
-}
-```
-
-Kausate (`monitor.change_detected`) fires **once per event** — N changes → N deliveries:
-
-```json
-{
-  "event": "monitor.change_detected",
-  "monitor_id": "5d4241a1-...",
-  "kausate_id": "co_de_...",
-  "event_id": "b2fa69b8-...",
-  "event_code": "INSOLVENCY_DECISION",
-  "category": "status",
-  "severity": "info",
-  "detected_at": "2026-05-04T22:00:00Z",
-  "before": null,
-  "after": { /* publication payload or new value */ },
-  "metadata": { "source": "...", "jurisdiction": "de", "api_url": "..." }
-}
-```
-
-Key differences:
-- Kausate uses **snake_case** on monitor webhooks; order webhooks use camelCase. **Don't share a single deserialization model across both channels.**
-- Idempotency key is `event_id` (not `monitor_id`).
-- Kausate adds `before` / `after` / `diff_path` so you can render specific value transitions.
-- Kausate's `event_code` is more granular than `category` (`INSOLVENCY_OPENED` vs `INSOLVENCY_DECISION`). Route on `category` for fan-out, `event_code` for specific transitions.
-
-See `../monitors.md` for sources discovery, `event_code` taxonomy, filtering, and auto-deactivation.
-
----
-
-## 10. Webhooks — Svix HMAC → shared-secret header
+## 9. Webhooks — Svix HMAC → shared-secret header
 
 The biggest receiver-side change. Topograph signs every webhook with Svix HMAC; Kausate order webhooks authenticate via a header you set at subscription.
 
@@ -464,31 +390,30 @@ app.post("/webhooks/kausate", express.json(), (req, res) => {
 
 Differences worth flagging:
 - **No raw-body handling.** No HMAC → plain `express.json()` is fine.
-- **Idempotency key is `orderId`** (or `event_id` for monitors). Kausate retries up to 50× (exp backoff, 1 s → 4 h max); same-day dedup can also produce duplicates.
+- **Idempotency key is `orderId`.** Kausate retries up to 50× (exp backoff, 1 s → 4 h max); same-day dedup can also produce duplicates.
 - **30 s ack timeout** (Topograph: retries on non-2xx for up to 3 days).
-- Strip the Svix SDK entirely. Replay protection is via `orderId` / `event_id` idempotency, not signature.
+- Strip the Svix SDK entirely. Replay protection is via `orderId` idempotency, not signature.
 
 ---
 
-## 11. Pricing surface diff
+## 10. Pricing surface diff
 
 | Topograph | Kausate |
 |---|---|
-| `GET /v2/pricing?countryCode=FR` returns `blocks[].modes.{verification, onboarding}`, `pricingMode: fixed \| variable`, `includedDocuments[]`, `monitoring` (zero-cost auto-monitored) | **No pre-query pricing endpoint.** Post-hoc only. |
+| `GET /v2/pricing?countryCode=FR` returns `blocks[].modes.{verification, onboarding}`, `pricingMode: fixed \| variable`, `includedDocuments[]` | **No pre-query pricing endpoint.** Post-hoc only. |
 | Prices in **credits (cents)**; "may vary by subscription plan" | Per-SKU in dashboard; per-call cost via `GET /v2/analytics/summary` |
 | `maxBudget`, `profileMaxBudget`, `graphMaxBudget` — hard caps; fail with `budget_exceeded` | (no per-call budget knobs — org-level alerts in dashboard) |
 | `pricingMode: variable` (Hungary etc.) — resolved at request time | All workflows priced per-SKU at completion; no pre-quote |
-| Monitoring auto-billed at zero cost on zero-cost blocks | `AAKMON` (1 credit per scheduled tick) + `AAKEVT` (1 credit per delivered event, refunded if all retries fail) — see `../monitors.md` |
 
 **Strategy advice:**
 - Drop any code branching on `GET /v2/pricing`. The endpoint split (`prefill` cheap, async endpoints registry-live) replaces the per-call decision.
 - If you used `maxBudget` to cap spend on variable-priced countries, enforce a tighter org-level cap in the dashboard or pre-screen which `kausateId`s your end-customers can query.
 - Treat every call as billable; monitor spend via `GET /v2/analytics/summary` and `GET /v2/analytics/breakdowns?groupBy=sku`.
-- 24 h dedup exists in Kausate too, but the key is `(kausateId, workflow, customerReference, customerId, UTC-day)` — see §16 and `../status-and-dedup.md`.
+- 24 h dedup exists in Kausate too, but the key is `(kausateId, workflow, customerReference, customerId, UTC-day)` — see §15 and `../status-and-dedup.md`.
 
 ---
 
-## 12. Workspaces
+## 11. Workspaces
 
 Topograph supports multiple workspaces per account:
 
@@ -510,7 +435,7 @@ Topograph's billing-event `dedupKey` has no equivalent — Kausate doesn't emit 
 
 ---
 
-## 13. Documents — client-side bucketing helper
+## 12. Documents — client-side bucketing helper
 
 Mapping covered in §5.7. If your UI depended on Topograph's `DocumentsDTO` buckets, rebuild them from the flat list:
 
@@ -529,7 +454,7 @@ Reminder: Topograph re-issues a fresh signed URL **free within 24 h** via `GET /
 
 ---
 
-## 14. TEST country sandbox
+## 13. TEST country sandbox
 
 **Topograph** ships a `countryCode: "TEST"` sandbox with special IDs: `RESOURCE_NOT_FOUND`, `INVALID_REQUEST`, `PROCESSING_FAILED`, `SERVICE_UNAVAILABLE` trigger the matching error responses; `GRAPH_*` prefixes return canned shareholder structures (simple, chained, circular, wide, mixed, deep, empty); all bundle a free Trade Register Extract.
 
@@ -542,7 +467,7 @@ Reminder: Topograph re-issues a fresh signed URL **free within 24 h** via `GET /
 
 ---
 
-## 15. Status / error mapping
+## 14. Status / error mapping
 
 ```text
 Topograph (per-dataPoint, keyed by name AND by document UUID):
@@ -577,7 +502,7 @@ See `../errors-and-anti-patterns.md`.
 
 ---
 
-## 16. Migration footguns
+## 15. Migration footguns
 
 - **`companyProfile` can't mix with granular dataPoints in one Topograph request.** Kausate has no such constraint — each order is independent. Delete the workaround.
 - **VAT in `taxId.value` excludes country prefix in Topograph** (`27443061841`, not `FR27443061841`). Kausate handles VAT per-jurisdiction via the relevant `identifiers.vat` field — verify the format per country (some prefixed, some not). See `../identifiers.md`.
@@ -591,7 +516,7 @@ See `../errors-and-anti-patterns.md`.
 
 ---
 
-## 17. Before / after — three worked examples
+## 16. Before / after — worked examples
 
 ### A. Full company onboarding (search → company + UBO → use)
 
@@ -663,72 +588,9 @@ await kausate.POST("/v2/companies/shareholder-graph", {
 // To go deeper later: another order at a larger maxDepth.
 ```
 
-### C. Monitor migration (Svix HMAC → Kausate)
-
-**Topograph receiver + create:**
-
-```ts
-import { Webhook } from "svix";
-const wh = new Webhook(process.env.TOPOGRAPH_WEBHOOK_SECRET!);
-
-app.post("/webhooks/topograph", express.raw({ type: "*/*" }), (req, res) => {
-  const payload = wh.verify(req.body, {
-    "svix-id": req.header("svix-id")!,
-    "svix-timestamp": req.header("svix-timestamp")!,
-    "svix-signature": req.header("svix-signature")!,
-  });
-  if (payload.type === "monitor.notification") {
-    for (const cat of payload.changeCategories) route(cat, payload);
-  }
-  res.status(200).end();
-});
-
-await fetch("https://api.topograph.co/v2/monitors", {
-  method: "POST", headers: { "x-api-key": KEY, "Content-Type": "application/json" },
-  body: JSON.stringify({ companyId: "123456789", countryCode: "DE" }),
-});
-```
-
-**Kausate receiver + create:**
-
-```ts
-// Receiver — no HMAC; monitor webhooks have no custom-header support today
-app.post("/webhooks/kausate-monitors/<unguessable-segment>", express.json(), (req, res) => {
-  const p = req.body;
-  if (p.event !== "monitor.change_detected") return res.status(200).end();
-  if (alreadyProcessed(p.event_id)) return res.status(200).end(); // idempotent on event_id
-  markProcessed(p.event_id);
-
-  switch (p.category) {
-    case "disappeared":           opsAlert(p); break;
-    case "ownership":             complianceReview(p); break;
-    case "status":
-      if (p.event_code.startsWith("INSOLVENCY_")) riskTeam(p);
-      break;
-    // legalRepresentatives, address, financial, other — same names as Topograph
-  }
-  res.status(200).end();
-});
-
-// Discover applicable sources, then create
-const sources = await kausate.GET("/v2/monitors/sources", { params: { query: { kausateId } } });
-await kausate.POST("/v2/monitors", {
-  body: {
-    kausateId: "co_de_2tT6getO1qTAvO3iaGnju6",
-    sources: sources.data.sources.map(s => s.name),
-    scheduleCron: "0 9 * * *",
-    webhookUrl: "https://your-app.example.com/webhooks/kausate-monitors/<unguessable-segment>",
-    categoriesFilter: ["status", "ownership", "disappeared"],
-    autoDeactivateCategories: ["disappeared"],
-  },
-});
-```
-
-Shifts: strip Svix; idempotent on `event_id` not `monitor_id`; **N webhooks for N changes** (not one with `changeCategories: [...]`); discover sources first; use `categoriesFilter` to reduce noise.
-
 ---
 
-## 18. Reference index
+## 17. Reference index
 
 - `../auth-versioning.md` — header rename, `Kausate-Version` pinning, generated-client recipes
 - `../endpoints.md` — full endpoint inventory and body shapes
@@ -736,7 +598,6 @@ Shifts: strip Svix; idempotent on `event_id` not `monitor_id`; **N webhooks for 
 - `../status-and-dedup.md` — six order statuses, same-day dedup tuple, `bypassCache`
 - `../customer-correlation.md` — `customerReference` vs `customerId` (`X-Customer-Id` header)
 - `../documents.md` — two-step flow, pre-signed URLs, expiry handling
-- `../monitors.md` — sources, categories, `event_code` taxonomy, monitor webhook payload, auto-deactivation
 - `../identifiers.md` — native registry ID formats per jurisdiction
 - `../errors-and-anti-patterns.md` — HTTP codes, common mistakes
 - `../production-checklist.md` — pre-ship review

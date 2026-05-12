@@ -42,7 +42,6 @@ Three deltas dominate regardless of version:
 | Download document | `urlField` (returned with status) | `links.download` on order | `result.downloadLink` (pre-signed, `expiresAt`) |
 | Single-layer UBO | (no direct — see below) | — | `POST /v2/companies/ubo` |
 | Multi-layer UBO / shareholder graph | `POST /core/uboverify/create/{ISO}/{code}` + `GET /core/uboverify/list/{orderId}` | — *(not in V2 nav as of 2026-05)* | `POST /v2/companies/shareholder-graph` |
-| Change monitoring | Company Watch (sales-led, no public API) | (same — no public API) | `POST /v2/monitors` (self-serve) |
 | Webhooks for completions | — (poll-only) | — (poll-only) | `POST /v2/webhooks` |
 | Sanctions / PEP | not in public API | not in public API | not in Kausate API |
 | Jurisdiction capability matrix | static.kyckr.com PDF / sales | static.kyckr.com PDF / sales | `GET /v2/platform/jurisdictions` |
@@ -426,45 +425,9 @@ Kyckr defines a **12-value RFNC** enum on `reasonForNonContinuationField.typeFie
 
 **No UBO PDF report on either side.** Kyckr's portal renders a PDF; Kyckr V1's API doesn't expose one. Kausate is the same — `shareholder-graph` returns JSON; render your own PDF from `result` if you need one.
 
-### 5.6 Company Watch / ongoing monitoring
-
-Kyckr's **Company Watch** / **Ongoing Monitoring** product exists but is **sales-led, not self-serve**: no `/monitoring` or `/watch` endpoint on V1 or V2 developer.kyckr.com. Marketing pages describe four event classes — *new/removed directors*, *new/removed shareholders*, *changes to capital structure*, *changes to registration details* — across two tiers (Lite / Enhanced). Delivery channel is bespoke per customer (push / poll / email), no published pricing, no documented schema.
-
-**Migrating means you finally get a self-serve, public-API change-monitoring product.** Map the Kyckr event classes to Kausate's `category` taxonomy:
-
-| Kyckr Company Watch event class | Kausate `category` | Example `event_code`s |
-|---|---|---|
-| New / removed directors | `legalRepresentatives` | `DIRECTOR_ADDED`, `AUTHORIZED_SIGNATORY_CHANGED` |
-| New / removed shareholders | `ownership` | `SHAREHOLDER_ADDED`, `UBO_PERCENTAGE_CHANGED` |
-| Changes to capital structure | `financial` | `SHARE_CAPITAL_CHANGED`, `FINANCIAL_FILING_PUBLISHED` |
-| Changes to registration details | `other` (and `address` for address-only) | `NAME_CHANGED`, `LEGAL_FORM_CHANGED`, `REGISTERED_ADDRESS_CHANGED` |
-| (Kyckr also delivers a list of new filings within the window) | — | New filings are not a `monitor.change_detected` event; subscribe to `financial` (for accounts) and re-`list documents` to discover new ones |
-| (not in Kyckr Company Watch) | `status` | `INSOLVENCY_OPENED`, `INSOLVENCY_DECISION`, `STATUS_CHANGED` — Kausate also ships insolvency-feed monitoring (DE Insolvenzbekanntmachungen today, more coming) |
-| (not in Kyckr Company Watch) | `disappeared` | `COMPANY_DISSOLVED`, `COMPANY_STRUCK_OFF` — flips `is_active=false` automatically |
-
-Create a monitor:
-
-```bash
-curl -X POST https://api.kausate.com/v2/monitors \
-  -H "X-API-Key: $KAUSATE_API_KEY" \
-  -H "Kausate-Version: 2026-05-01" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kausateId": "co_de_...",
-    "sources": ["company_report", "shareholder_graph",
-                "de_insolvenzbekanntmachungen.feed"],
-    "scheduleCron": "0 9 * * *",
-    "webhookUrl": "https://your-app.example.com/webhooks/kausate-monitors",
-    "categoriesFilter": ["legalRepresentatives", "ownership", "financial",
-                         "status", "disappeared"]
-  }'
-```
-
-Full reference: `../monitors.md`. **Don't reuse your async-completion webhook handler for monitor events** — different payload shape (snake_case, `event_code` / `category` discriminator) and different per-monitor URL.
-
 ### 5.7 Webhooks — the production-pattern flip
 
-To be explicit: **Kyckr has no developer-API webhook**, V1 or V2. Order completion, UBO Verify completion, and any non-Company-Watch event must be polled at the recommended **once-a-minute** cadence. No HMAC, no subscription endpoint, no event types. Company Watch *may* deliver via push under a bespoke contract — but that's sales-provisioned.
+To be explicit: **Kyckr has no developer-API webhook**, V1 or V2. Order completion and UBO Verify completion must be polled at the recommended **once-a-minute** cadence. No HMAC, no subscription endpoint, no event types.
 
 Migrating to Kausate:
 
@@ -584,7 +547,7 @@ Things that bite when porting code mechanically:
 - **`productCodeField` literals differ per jurisdiction.** Kyckr's `productCodeField` values are registry-specific (`AnnualAccounts`, `Chronological`, `MM-1.1`, etc.) with no global catalogue. Don't literal-map them. Kausate's `documentType` is a small normalized enum — route on `documentType`; display `title` to the user.
 - **Kyckr `OrderRef` ≠ Kausate `customerId`.** Kyckr's `OrderRef` → Kausate's `customerReference` (body field, ≤150 URL-safe chars). Kausate's **`customerId`** is different — an **end-customer / tenant identifier** sent via the **`X-Customer-Id` header**. Putting it in the body returns 422. See `../customer-correlation.md`.
 - **No bulk endpoints on either side.** Client-side fan-out + reconciliation. There is no `/v2/companies/report/batch` on Kausate.
-- **Refund policy.** Kyckr's docs are silent on whether `statusField=5` filings are credited back (the portal does it). Kausate refunds `AAKEVT` (monitor events) when every webhook retry fails; for data-order failures, check `/v2/analytics/breakdowns` rather than assuming a refund.
+- **Refund policy.** Kyckr's docs are silent on whether `statusField=5` filings are credited back (the portal does it). On Kausate, for data-order failures, check `/v2/analytics/breakdowns` rather than assuming a refund.
 
 ---
 
@@ -719,7 +682,6 @@ What you add: a webhook handler with a `shareholderGraph` branch.
 - **Async lifecycle + webhook receiver pattern** — `../async-webhooks.md`
 - **All six order statuses + same-day dedup + `bypassCache`** — `../status-and-dedup.md`
 - **Document retrieval (two-step flow, pre-signed URLs)** — `../documents.md`
-- **Change monitoring (sources, cron, event taxonomy)** — `../monitors.md`
 - **Per-jurisdiction native ID formats** — `../identifiers.md`
 - **`customerReference` vs `customerId` semantics** — `../customer-correlation.md`
 - **Live OpenAPI spec** (auth required) — `https://api.kausate.com/openapi.json`

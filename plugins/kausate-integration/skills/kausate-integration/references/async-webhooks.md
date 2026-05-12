@@ -1,7 +1,5 @@
 # Async lifecycle, webhooks, and polling fallback
 
-> **This file is about order-completion webhooks** (`POST /v2/webhooks` subscriptions, `ExecutionResponse` payload, camelCase). **Monitor change-event webhooks are a separate channel** with a different payload shape — see `monitors.md`. Don't reuse one handler for both.
-
 Most data endpoints are async because government registries time out, rate-limit, and have weekend/maintenance outages. The async flow:
 
 1. Your code `POST`s to a data endpoint with `kausateId` in the body. The API returns `{orderId, status: "running"}` immediately.

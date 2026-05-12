@@ -56,12 +56,11 @@ All of the above accept the same standard body fields:
 
 For each async endpoint there's a matching sync variant at `/{family}/sync` and a polling endpoint at `GET /v2/companies/{family}/{orderId}` (see `async-webhooks.md`).
 
-## Webhooks, monitors, analytics, jurisdictions
+## Webhooks, analytics, jurisdictions
 
 | Endpoint | Purpose |
 |---|---|
 | `POST /v2/webhooks` / `GET` / `PUT /{id}` / `DELETE /{id}` | Manage webhook subscriptions |
-| `POST /v2/monitors` / `GET` / `GET /{id}` / `DELETE /{id}` | Monitor a company on a cron schedule, fire webhook on detected changes |
 | `GET /v2/analytics/summary` | Usage / cost rollup, filterable by date range, workflowType, sku, customerId |
 | `GET /v2/analytics/timeseries` | Same metrics over time |
 | `GET /v2/analytics/breakdowns` | Pivot by jurisdiction, sku, customerId |

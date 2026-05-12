@@ -1,6 +1,6 @@
 ---
 name: kausate-integration
-description: Integrate or migrate to the Kausate company-data API (KYB / business registries / shareholder graphs / UBO / documents / change monitoring). Investigate the user's codebase first, ask the few questions the codebase can't answer, then generate production-grade integration code — typed client from the live OpenAPI, async + webhooks, customerId / customerReference, polling fallback. Use this skill whenever the user asks to integrate Kausate, fetch company data, do KYB, look up companies in business registries, retrieve shareholder graphs / UBO / company reports / annual accounts, monitor a company for changes, wire up Kausate webhooks, or migrate from Kyckr, Moody's (kompany / Orbis / Maxsight / Bureau van Dijk), Topograph, OpenCorporates, or any other KYB / company-data provider.
+description: Integrate or migrate to the Kausate company-data API (KYB / business registries / shareholder graphs / UBO / documents). Investigate the user's codebase first, ask the few questions the codebase can't answer, then generate production-grade integration code — typed client from the live OpenAPI, async + webhooks, customerId / customerReference, polling fallback. Use this skill whenever the user asks to integrate Kausate, fetch company data, do KYB, look up companies in business registries, retrieve shareholder graphs / UBO / company reports / annual accounts, wire up Kausate webhooks, or migrate from Kyckr, Moody's (kompany / Orbis / Maxsight / Bureau van Dijk), Topograph, OpenCorporates, or any other KYB / company-data provider.
 ---
 
 # Kausate integration
@@ -40,11 +40,11 @@ After the scan, ask the **smallest set of questions needed** to get to good code
 
 The fixed questions to consider, in priority order:
 
-1. **Use case mix.** "Which capabilities do you need? Pick all that apply: (a) search companies → fetch company report, (b) UBO / shareholders, (c) shareholder graph (multi-level ownership), (d) document retrieval (registered extracts, articles of association), (e) ongoing change monitoring (insolvency, director changes, ownership changes), (f) form prefill / autocomplete UX. *Most integrations are (a)+(b); add more only if you'll actually use them — each one is its own endpoint and webhook flow.*"
+1. **Use case mix.** "Which capabilities do you need? Pick all that apply: (a) search companies → fetch company report, (b) UBO / shareholders, (c) shareholder graph (multi-level ownership), (d) document retrieval (registered extracts, articles of association), (e) form prefill / autocomplete UX. *Most integrations are (a)+(b); add more only if you'll actually use them — each one is its own endpoint and webhook flow.*"
 
 2. **Webhook reachability.** "Can your service receive inbound HTTPS webhooks from the public internet? (Yes / not yet, will start with polling / on a private network — webhooks impossible.)" — If the codebase already has Stripe/Paddle/Svix webhook receivers, **don't ask** — instead confirm: *"You already receive Stripe webhooks at `app/api/webhooks/stripe`. I'll put the Kausate one alongside at `app/api/webhooks/kausate`. OK?"*
 
-   When you propose the file layout, propose **all of it up front**, not just the receiver: the typed client module, the order-completion receiver, the monitor change-event receiver (if monitoring is in scope — it's a separate webhook channel with a different payload shape), and the background-task / queue module if the codebase uses Celery / BullMQ / Sidekiq / cron. Partial layouts force the user to ask follow-up questions and slow the migration.
+   When you propose the file layout, propose **all of it up front**, not just the receiver: the typed client module, the order-completion receiver, and the background-task / queue module if the codebase uses Celery / BullMQ / Sidekiq / cron. Partial layouts force the user to ask follow-up questions and slow the migration.
 
 3. **API key source.** "Where should I read the Kausate API key from at runtime?" — Keep the answer in context and mirror it everywhere the key is referenced; don't reopen the question later. If the codebase already commits to one secret store (an `.env` file, an existing `SecretsManagerClient` / `vault.read(...)` / `getSecret(...)` call), **don't ask** — mirror that exact pattern for `KAUSATE_API_KEY` and just confirm before generating code. If they don't have a key yet, point them at [kausate.com/signup](https://www.kausate.com/signup) → dashboard → API keys.
 
@@ -71,7 +71,6 @@ Based on the scan + answers, read **only** the reference files you need. Don't p
 | `customerReference` vs `customerId` semantics | `references/customer-correlation.md` | `https://docs.kausate.com/agents/references/customer-correlation.md` |
 | All six order statuses + same-day dedup + `bypassCache` | `references/status-and-dedup.md` | `https://docs.kausate.com/agents/references/status-and-dedup.md` |
 | Document retrieval (two-step flow, pre-signed URLs) | `references/documents.md` | `https://docs.kausate.com/agents/references/documents.md` |
-| Change monitoring (cron sources, feed sources, event taxonomy) | `references/monitors.md` | `https://docs.kausate.com/agents/references/monitors.md` |
 | Per-jurisdiction native ID formats | `references/identifiers.md` | `https://docs.kausate.com/agents/references/identifiers.md` |
 | Error codes + anti-patterns to avoid generating | `references/errors-and-anti-patterns.md` | `https://docs.kausate.com/agents/references/errors-and-anti-patterns.md` |
 | Pre-ship review | `references/production-checklist.md` | `https://docs.kausate.com/agents/references/production-checklist.md` |

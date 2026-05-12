@@ -5,13 +5,13 @@
 | Code | Meaning | What to do |
 |---|---|---|
 | `200` | Success — for async endpoints, check `status` in body | Branch on `status` |
-| `201` | Created (monitor / webhook) | Persist returned id |
+| `201` | Created (webhook) | Persist returned id |
 | `204` | Deleted | Resource is gone |
 | `400` | Invalid input (malformed `kausateId`, invalid cron, unsupported jurisdiction) | Validate against the OpenAPI spec; check `detail` |
 | `401` | Missing / invalid `X-API-Key` | Verify env var; rotate if leaked |
 | `402` | Payment required (credits exhausted) | Top up; check `/v2/analytics/summary` |
 | `403` | Forbidden (insufficient permissions, or feature not enabled for org) | Contact sales for premium features |
-| `404` | Company / order / monitor / webhook not found | Verify the id; for orders, dedup may have returned an existing one |
+| `404` | Company / order / webhook not found | Verify the id; for orders, dedup may have returned an existing one |
 | `408` | Sync request timed out (300 s hard limit) | Switch to async + webhooks |
 | `422` | Pydantic validation failure (type mismatch, missing required field, body field that should be a header — e.g. `customerId` in body instead of `X-Customer-Id`) | Check the JSON-schema error in `detail` |
 | `429` | Rate limited (gateway-level; not surfaced via headers) | Back off; rate limits are per-org |

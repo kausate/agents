@@ -105,13 +105,7 @@ If you're still on v1 in 2026, the rational path is **skip v2 entirely**. Migrat
 | UBO discovery | `POST /api/v1/ubodiscovery/order/{subjectId}` | `POST /api/v2/ubodiscovery/order` | `POST /v2/companies/ubo` (single layer) or `POST /v2/companies/shareholder-graph` (multi-level) |
 | UBO update (paused/awaiting input) | `POST /api/v1/ubodiscovery/update/{discoveryOrderId}` | `POST /api/v2/ubodiscovery/update` | Not exposed — Kausate handles paused-discovery internally; you receive the final webhook |
 | UBO result fetch | `GET /api/v1/ubodiscovery/{discoveryOrderId}` | `POST /api/v2/ubodiscovery/result` | Webhook delivery (`result.type: uboReport` / `shareholderGraph`); polling fallback `GET /v2/companies/ubo/{orderId}` |
-| Monitoring register | `POST /api/v1/monitoring/register/{subjectId}/{changeType}` | `POST /api/v2/monitoring/register` | `POST /v2/monitors` with `sources` + `categoriesFilter` |
-| Monitoring list | `GET /api/v1/monitoring/list[/{subjectId}]` | `POST /api/v2/monitoring/list` | `GET /v2/monitors` |
-| Monitoring change types | `GET /api/v1/monitoring/changetypes` | `POST /api/v2/monitoring/changetypes` | `GET /v2/events/taxonomy` (returns `categories` + `eventCodes`) |
-| Monitoring unregister | `POST /api/v1/monitoring/unregister/{monitorId}` | `POST /api/v2/monitoring/unregister` | `DELETE /v2/monitors/{monitorId}` |
-| Announcements | `GET /api/v1/announcements/check/{subjectId}` + `/notify/register/{subjectId}/{uri}` | `POST /api/v2/announcements/check` + `/notify/register` | `POST /v2/monitors` with a feed-mode source (e.g. `de_insolvenzbekanntmachungen.feed`) |
 | PEP / sanctions / adverse media | `POST /api/v1/pepsanction/check` (singular) | `POST /api/v2/pepsanction/check` | **Not in Kausate** — separate-vendor concern (Sanctions360, Refinitiv, ComplyAdvantage, …) |
-| PEP/sanctions monitoring | `POST /api/v1/pepsanction/monitoring/register/{reportId}` | `POST /api/v2/pepsanction/monitoring/register` | **Not in Kausate** |
 | Tax / VAT verify | `GET /api/v1/euvat/verify/basic/{vat}` (+ comprehensive / level2) | `POST /api/v2/euvat/verify/{tier}` | **Not in Kausate** — call VIES directly or use a dedicated VAT vendor |
 | TIN / EIN / IBAN | `GET /api/v1/{tin,ein,iban}/verify/{value}` | `POST /api/v2/...` | **Not in Kausate** — separate-vendor concern |
 | Stock-exchange listing | `GET /api/v1/stockexchange/isin/lei/{lei}` + `/listing/{isin}` | `POST /api/v2/stockexchange/...` | **Not in Kausate** — Kausate is registry data, not market data |
@@ -384,89 +378,6 @@ Parameter shift to be aware of:
 | Two formats: JSON + PDF | JSON only via webhook; if you need a PDF, render server-side from the JSON or order an articles-of-association / shareholder-list document via `/v2/companies/documents` |
 | Paused / update flow for human-input layers (e.g. trust intermediaries) | Not exposed to the caller — Kausate handles paused-discovery internally; you receive the final webhook delivery |
 
-### Monitoring
-
-**kompany:**
-
-```
-POST /api/v1/monitoring/register/{subjectId}/{changeType}
-POST /api/v1/monitoring/unregister/{monitorId}
-GET  /api/v1/monitoring/list/{subjectId}
-GET  /api/v1/monitoring/list
-GET  /api/v1/monitoring/changetypes   # the enum of event types
-```
-
-Monitoring change notifications were delivered through the **Product Notifier** webhook — the same per-order webhook subscription mechanism used for product orders. The change-type enum was gated; `GET /monitoring/changetypes` was the discoverable list (officer-change, address-change, financials-filed, status-change, etc.).
-
-**Kausate:**
-
-```bash
-# 1. Discover which sources apply to this company (sources are jurisdiction-gated)
-curl -G https://api.kausate.com/v2/monitors/sources \
-  --data-urlencode "kausateId=co_de_..." \
-  -H "X-API-Key: $KAUSATE_API_KEY" \
-  -H "Kausate-Version: 2026-05-01"
-
-# 2. Create a monitor with one or more sources + a per-monitor webhookUrl
-curl -X POST https://api.kausate.com/v2/monitors \
-  -H "X-API-Key: $KAUSATE_API_KEY" \
-  -H "Kausate-Version: 2026-05-01" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kausateId":"co_de_...",
-    "sources":["company_report","shareholder_graph","de_insolvenzbekanntmachungen.feed"],
-    "scheduleCron":"0 9 * * *",
-    "webhookUrl":"https://your-app.example.com/webhooks/kausate-monitors",
-    "categoriesFilter":["status","ownership","disappeared"],
-    "autoDeactivateCategories":["disappeared"]
-  }'
-
-# 3. The event taxonomy is discoverable (replaces /monitoring/changetypes)
-curl https://api.kausate.com/v2/events/taxonomy \
-  -H "X-API-Key: $KAUSATE_API_KEY" \
-  -H "Kausate-Version: 2026-05-01"
-```
-
-Migration footguns specific to monitoring:
-
-- **Product Notifier was unified with product-order webhooks.** Kausate splits them: `POST /v2/webhooks` for order completions (`ExecutionResponse` payload, camelCase), per-monitor `webhookUrl` for change events (`monitor.change_detected` payload, **snake_case**, completely different shape). Don't reuse one handler — host them at different paths.
-- **kompany's `changeType` is a single string per registration.** Kausate's `sources` is a list (you can monitor `company_report` + `shareholder_graph` + a feed source on one monitor), filtered by `categoriesFilter` / `eventCodesFilter`. Map your single-changeType kompany registrations to single-element `sources` lists if you want behavioural parity.
-- **Auto-deactivation has no kompany equivalent.** By default, any `disappeared` event flips `is_active=false` and stops billing. Pass `"autoDeactivateCategories": []` to opt out.
-
-The full monitor surface (sources, categories, taxonomy, billing, replay) is in `../monitors.md`.
-
-### Announcements (statutory gazette / registry announcements)
-
-**kompany:**
-
-```
-GET  /api/v1/announcements/check/{subjectId}
-GET  /api/v1/announcements/get/{subjectId}
-POST /api/v1/announcements/notify/register/{subjectId}/{uri}
-POST /api/v1/announcements/notify/unregister/{notifierId}
-GET  /api/v1/announcements/notify/list/{subjectId}
-GET  /api/v1/announcements/notify/list
-```
-
-Country support was gated; sales contact was the only way to confirm. Same **tilde-for-slash encoding** rule as Product Notifier (see footguns below).
-
-**Kausate:** Announcements are folded into the monitor model as **feed-mode sources**. For German `Insolvenzbekanntmachungen` (§9 InsO portal):
-
-```bash
-curl -X POST https://api.kausate.com/v2/monitors \
-  -H "X-API-Key: $KAUSATE_API_KEY" \
-  -H "Kausate-Version: 2026-05-01" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kausateId":"co_de_...",
-    "sources":["de_insolvenzbekanntmachungen.feed"],
-    "scheduleCron":"0 0 * * *",
-    "webhookUrl":"https://your-app.example.com/webhooks/kausate-monitors"
-  }'
-```
-
-Feed-mode sources are global feeds matched server-side to companies in the Kausate index. The `scheduleCron` is **ignored** for feeds (they run on upstream cadence) but is still a required field — pass any valid expression. Feed events have `before: null` and `after: <publication payload>` in the webhook (the publication itself is the change). See `../monitors.md`.
-
 ### PEP / sanctions / adverse media
 
 **kompany:**
@@ -496,13 +407,13 @@ POST /api/v1/pepsanction/monitoring/unregister/{monitoringId}
 
 **kompany v2:** `GET /api/v2/system/coverage?countryCode=...&countryConnectionType=...` — single endpoint, replaces the four v1 `/system/*` calls. Returns sources, available datasets, available documents (SKUs), search modes, concierge products per jurisdiction.
 
-**Kausate:** `GET /v2/platform/jurisdictions` returns the capability matrix per jurisdiction (which products are supported, what document types exist). Combine with `GET /v2/monitors/sources?kausateId=...` for per-company source discovery (see `../monitors.md`).
+**Kausate:** `GET /v2/platform/jurisdictions` returns the capability matrix per jurisdiction (which products are supported, what document types exist).
 
 ## A.6 — Encoding quirks that will silently break your port
 
 These are real artifacts of the kompany API surface, documented in the v1 reference. If you don't account for them, your port will compile, your tests will pass on happy paths, and production will fail in subtle ways.
 
-1. **Tilde-for-slash in callback URI path segments.** v1 paths like `/api/v1/product/notifier/{orderId}/{type}/{uri}` and `/api/v1/announcements/notify/register/{subjectId}/{uri}` put the callback URL **in the path**. Forward slashes in the URL had to be replaced with `~` before passing them in the path; kompany decoded `~` back to `/` server-side before POSTing the callback. **A naive `encodeURIComponent` of the URL breaks the route** — kompany doesn't decode `%2F`, it expects `~`. Kausate uses a JSON body field (`url`) for `POST /v2/webhooks` and `webhookUrl` for `POST /v2/monitors` — drop the tilde-substitution code entirely.
+1. **Tilde-for-slash in callback URI path segments.** v1 paths like `/api/v1/product/notifier/{orderId}/{type}/{uri}` put the callback URL **in the path**. Forward slashes in the URL had to be replaced with `~` before passing them in the path; kompany decoded `~` back to `/` server-side before POSTing the callback. **A naive `encodeURIComponent` of the URL breaks the route** — kompany doesn't decode `%2F`, it expects `~`. Kausate uses a JSON body field (`url`) for `POST /v2/webhooks` — drop the tilde-substitution code entirely.
 
 2. **`fiancialData` typo in the Concierge body.** The kompany Concierge endpoint accepts optional booleans `registerData, fiancialData [sic], historicInformation, localInvestigation`. The typo (`fiancial` missing the `n`) is the production spelling. **Don't "correct" it client-side** — the corrected spelling fails server-side validation. If you had a wrapper that normalised the typo before forwarding to kompany, that wrapper does nothing useful for Kausate (Kausate doesn't have a concierge endpoint at all).
 
@@ -524,17 +435,15 @@ These are real artifacts of the kompany API surface, documented in the v1 refere
 
 3. **Product Notifier ≠ unified Kausate webhook.** kompany registered a Product Notifier **per order** (`POST /api/v1/product/notifier/{orderId}/{type}/{uri}`). Kausate has **one org-wide subscription** (`POST /v2/webhooks`) that receives every order completion for your org. Switch on `result.type` in your handler — see `../async-webhooks.md`. Don't try to "subscribe per order" — that pattern doesn't exist in Kausate.
 
-4. **Order webhook ≠ monitor webhook.** Two distinct channels with different payloads (camelCase `ExecutionResponse` vs snake_case `monitor.change_detected`). Host them on different paths. See `../monitors.md`.
+4. **Status-string mismatch.** kompany strings → Kausate enum — see the table in §Status mapping below.
 
-5. **Status-string mismatch.** kompany strings → Kausate enum — see the table in §Status mapping below.
+5. **`id` vs `kompanyId` in dataset POSTs.** If your code is partway through v1 → v2 and uses both, the field rename is silent — a wrong field name returns a 4xx with a generic message. Code-grep for `"id":` adjacent to `"datasetName":` and replace with `"kompanyId":`.
 
-6. **`id` vs `kompanyId` in dataset POSTs.** If your code is partway through v1 → v2 and uses both, the field rename is silent — a wrong field name returns a 4xx with a generic message. Code-grep for `"id":` adjacent to `"datasetName":` and replace with `"kompanyId":`.
+6. **`full` → `index` rename in `datasetName`.** Same silent-failure shape. Code-grep for `"datasetName":"full"`.
 
-7. **`full` → `index` rename in `datasetName`.** Same silent-failure shape. Code-grep for `"datasetName":"full"`.
+7. **`index` is disabled in 11 jurisdictions.** In `HU, US-TX, US-CA, ES, FI, GI, JE, LT, MT, SI, CA`, you must use `refresh` or `super`. On Kausate, all of these collapse to `POST /v2/companies/report` — but if you had jurisdiction-specific code branching on dataset name, audit it before porting.
 
-8. **`index` is disabled in 11 jurisdictions.** In `HU, US-TX, US-CA, ES, FI, GI, JE, LT, MT, SI, CA`, you must use `refresh` or `super`. On Kausate, all of these collapse to `POST /v2/companies/report` — but if you had jurisdiction-specific code branching on dataset name, audit it before porting.
-
-9. **kompany's 60-second polling cadence was normative, not advisory.** Polling faster than 60 s on `GET /api/v1/product/status/{orderId}` was historically rate-limited. Kausate's webhook replaces polling; if you fall back to polling, use the 5 s → 1.2× → 15 s cap schedule from `../async-webhooks.md`, not kompany's 60 s loop.
+8. **kompany's 60-second polling cadence was normative, not advisory.** Polling faster than 60 s on `GET /api/v1/product/status/{orderId}` was historically rate-limited. Kausate's webhook replaces polling; if you fall back to polling, use the 5 s → 1.2× → 15 s cap schedule from `../async-webhooks.md`, not kompany's 60 s loop.
 
 ---
 
@@ -758,7 +667,6 @@ What's on Maxsight that Kausate can replace:
 | UBO check | `POST /v2/companies/ubo` |
 | Ownership / shareholder graph | `POST /v2/companies/shareholder-graph` (`maxDepth` 1–7) |
 | Company document verification (when sourced from registry filings) | `POST /v2/companies/documents/list` → `POST /v2/companies/documents` |
-| Ongoing change monitoring (Maxsight schedules re-runs of checks) | `POST /v2/monitors` with `sources` + `categoriesFilter` |
 | Form prefill (Maxsight `collected_data` autofill) | `POST /v2/companies/prefill` (sync, < 200 ms) |
 
 What stays with Maxsight (or another vendor):
@@ -836,7 +744,7 @@ Key differences vs Maxsight's webhook:
 - **Idempotency on `orderId`.** Kausate retries up to 50 times with exponential backoff. Make your handler safe to receive the same payload twice.
 - **No batching.** Maxsight batches up to 100 messages every 0–10 s; Kausate delivers one webhook per order. If you relied on batching, that pattern doesn't carry over.
 
-The full webhook receiver checklist is in `../async-webhooks.md`. Monitor change-events (separate channel, snake_case payload) are in `../monitors.md` — don't reuse one handler for both.
+The full webhook receiver checklist is in `../async-webhooks.md`.
 
 ## C.5 — Maxsight integration providers — what you're actually migrating from
 
@@ -1115,7 +1023,6 @@ PEP/sanctions/adverse-media events stay on Maxsight's webhook receiver — Kausa
 - **`customerReference` vs `customerId` semantics** — `../customer-correlation.md`
 - **All six order statuses + same-day dedup + `bypassCache`** — `../status-and-dedup.md`
 - **Document retrieval (two-step flow, pre-signed URLs)** — `../documents.md`
-- **Change monitoring (cron sources, feed sources, event taxonomy)** — `../monitors.md`
 - **Per-jurisdiction native ID formats** — `../identifiers.md`
 - **Live OpenAPI spec** (auth required) — `https://api.kausate.com/openapi.json`
 - **Human-readable docs** — `https://docs.kausate.com`
