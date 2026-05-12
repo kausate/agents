@@ -2,7 +2,9 @@
 
 Integration artifacts for AI coding assistants (Claude Code, Codex, Cursor, Copilot, Gemini CLI, Aider, ...) integrating the [Kausate](https://kausate.com) company-data API.
 
-This repo is the **canonical source** for the Kausate integration playbook — `plugins/kausate-integration/skills/kausate-integration/SKILL.md`. Our docs site at [docs.kausate.com](https://docs.kausate.com) proxies the same file so customers can use either URL.
+This repo is the **canonical source** for the Kausate integration playbook — `plugins/kausate-integration/skills/kausate-integration/SKILL.md` (the interactive orchestrator) plus `plugins/kausate-integration/skills/kausate-integration/references/*.md` (per-topic detail and competitor migration playbooks). Our docs site at [docs.kausate.com](https://docs.kausate.com) proxies the same files so customers can use either URL.
+
+The skill is **interactive**: it inspects the user's codebase first, asks the few questions the code can't answer (use case mix, webhook reachability, jurisdictions), and then routes to only the references that match — including migration playbooks for replacing **Kyckr**, **Moody's** (kompany / Orbis / Maxsight / Bureau van Dijk), and **Topograph**.
 
 ## Install in Claude Code
 
@@ -41,15 +43,33 @@ echo "@AGENTS.md" > CLAUDE.md
 .claude-plugin/marketplace.json                              ← marketplace manifest
 plugins/kausate-integration/
 ├── .claude-plugin/plugin.json                               ← plugin manifest
-└── skills/kausate-integration/SKILL.md                      ← canonical skill content
+└── skills/kausate-integration/
+    ├── SKILL.md                                             ← lean orchestrator + interactive opener
+    └── references/
+        ├── auth-versioning.md
+        ├── endpoints.md
+        ├── async-webhooks.md
+        ├── customer-correlation.md
+        ├── status-and-dedup.md
+        ├── documents.md
+        ├── monitors.md
+        ├── identifiers.md
+        ├── errors-and-anti-patterns.md
+        ├── production-checklist.md
+        └── migrations/
+            ├── from-kyckr.md
+            ├── from-moodys.md       ← covers kompany / Orbis / Maxsight / BvD
+            └── from-topograph.md
 ```
 
 ## Editing the skill
 
-`plugins/kausate-integration/skills/kausate-integration/SKILL.md` is the only content file. Edit it here, push to `main`, and both surfaces update:
+Edit any file under `plugins/kausate-integration/skills/kausate-integration/`, push to `main`, and both surfaces update:
 
 - `https://github.com/kausate/agents` (this repo) — direct fetch
-- `https://docs.kausate.com/...` — proxied at the docs domain
+- `https://docs.kausate.com/...` — proxied at the docs domain (SKILL.md, references, and migration playbooks all served as URLs for AGENTS.md curl users)
+
+SKILL.md is the orchestrator (≈140 lines). Per-topic detail lives in `references/`, loaded on demand by progressive disclosure — keep each file self-contained and concise.
 
 ## Bug reports / suggestions
 
